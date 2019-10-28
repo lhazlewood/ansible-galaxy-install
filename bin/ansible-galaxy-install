@@ -1,16 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail # https://vaneyckt.io/posts/safer_bash_scripts_with_set_euxo_pipefail/
 
-# - ANSIBLE_CONFIG (environment variable if set)
-# - ansible.cfg (in the current directory)
-# - ~/.ansible.cfg (in the home directory)
-# - /etc/ansible/ansible.cfg
-# - ANSIBLE_ROLES_PATH env var
-# - defaults to: ~/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
-
 function main() {
-
-  #set -x
 
   if ! command -v tee >/dev/null 2>&1; then
     echo "ansible-galaxy-install: the 'tee' program is required for this ansible-galaxy wrapper to function correctly." >&2
@@ -89,17 +80,17 @@ function main() {
   # otherwise ansible-galaxy executed as expected - see if we need to inspect any newly-downloaded roles for
   # transitive meta/requirements.yml roles:
   output="$(grep '\- extracting ' "${file}" 2>/dev/null || true)"
-  rm -rf "${file}" # Now that we have the output, we no longer need the temp file - clean it up
+  rm -rf "${file}" >/dev/null 2>&1 # Now that we have the output, we no longer need the temp file - clean it up
 
   [[ -n "${output}" ]] || return 0 # no 'extracting' lines - nothing left to do
 
   while read -r line; do
     line="${line#"- extracting "}" # strip the prefix that we don't care about
-    value="${line%%' to '*}"
-    dir="${line##*' to '}"
+    value="${line%%' to '*}" # role name
+    dir="${line##*' to '}"   # role dir
     file="${dir}/meta/requirements.yml"
 
-    if [[ -r "${file}" ]]; then # a readable file exists:
+    if [[ -r "${file}" ]]; then # a readable requirements file exists:
       echo "- installing transitive dependencies for role ${value} from ${file}"
       transitive_args+=( '-r' "${file}" )
       set -eu
