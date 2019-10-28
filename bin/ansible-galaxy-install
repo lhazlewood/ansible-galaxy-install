@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail # https://vaneyckt.io/posts/safer_bash_scripts_with_set_euxo_pipefail/
+
+# - ANSIBLE_CONFIG (environment variable if set)
+# - ansible.cfg (in the current directory)
+# - ~/.ansible.cfg (in the home directory)
+# - /etc/ansible/ansible.cfg
+# - ANSIBLE_ROLES_PATH env var
+# - defaults to: ~/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
+
+function main() {
+
+  #set -x
+
+  if ! command -v tee >/dev/null 2>&1; then
+    echo "ansible-galaxy-install: the 'tee' program is required for this ansible-galaxy wrapper to function correctly." >&2
+    return 1
+  fi
+
+  local value= retval= dir= file= output= line=
+  local -a args=()               # all args specified
+  local -a transitive_args=() # args that will be used for transitive ansible-galaxy calls
+
+  if [[ "$#" -gt 0 ]]; then
+
+    while (( "$#" )); do
+      [[ "$1" == --*=* ]] && set -- "${1%%=*}" "${1#*=}" "${@:2}" # normalize `--foo=bar` into `--foo bar`
+      case "$1" in
+        -p|--roles-path)
+          value="${2:-}"
+          args+=('-p')
+          transitive_args+=('-p')
+          shift
+          [[ -n "${value}" ]] && { args+=("${value}"); transitive_args+=("${value}"); shift; }
+          ;;
+        -r|--role-file)
+          value="${2:-}"
+          args+=('-r')
+          shift
+          [[ -n "${value}" ]] && { args+=("${value}"); shift; }
+          ;;
+        -s|--server)
+          value="${2:-}"
+          args+=('-s')
+          transitive_args+=('-s')
+          shift
+          [[ -n "${value}" ]] && { args+=("${value}"); transitive_args+=("${value}"); shift; }
+          ;;
+        # all remaining args that don't have a trailing value:
+        -*)
+          args+=("$1")
+          transitive_args+=("$1")
+          shift
+          ;;
+        *) # non-option arguments are direct role references
+          args+=("$1")
+          shift
+          ;;
+        esac
+    done
+  fi
+
+  if [[ "${#args[@]}" -gt 0 ]]; then
+    set -- "${args[@]}" # reset positional arguments
+  fi
+
+  dir="${HOME}/.ansible/tmp/ansible-galaxy-install"
+  mkdir -p "${dir}"
+  file="$(mktemp "${dir}/ansible-galaxy.XXXXXXXXXXXXXXXX" 2>&1)"
+  if [[ "$?" -ne 0 ]]; then
+    echo "ansible-galaxy-install: unable to create output capture file: ${file}" >&2
+    return 1
+  fi
+  if ! mv "${file}" "${file}.txt" 2>&1; then
+    echo "ansible-galaxy-install: couldn't rename file ${file}" >&2
+    return 1
+  fi
+  file="${file}.txt"
+
+  set +eu
+  ansible-galaxy install "$@" | tee "${file}"
+  retval="${PIPESTATUS[0]}" # status code of ansible-galaxy, not tee
+  set -eu
+  if [[ "${retval}" -ne 0 ]]; then
+    rm -rf "${file}" >/dev/null 2>&1
+    return "${retval}" # ansible-galaxy didn't execute as expected, short-circuit
+  fi
+
+  # otherwise ansible-galaxy executed as expected - see if we need to inspect any newly-downloaded roles for
+  # transitive meta/requirements.yml roles:
+  output="$(grep '\- extracting ' "${file}" 2>/dev/null || true)"
+  rm -rf "${file}" # Now that we have the output, we no longer need the temp file - clean it up
+
+  [[ -n "${output}" ]] || return 0 # no 'extracting' lines - nothing left to do
+
+  while read -r line; do
+    line="${line#"- extracting "}" # strip the prefix that we don't care about
+    value="${line%%' to '*}"
+    dir="${line##*' to '}"
+    file="${dir}/meta/requirements.yml"
+
+    if [[ -r "${file}" ]]; then # a readable file exists:
+      echo "- installing transitive dependencies for role ${value} from ${file}"
+      transitive_args+=( '-r' "${file}" )
+      set -eu
+      main "${transitive_args[@]}" # recursive call
+      retval="$?"
+      set +eu
+      [[ "${retval}" -eq 0 ]] || return "${retval}"
+    fi
+  done <<< "${output}"
+}
+main "$@"
