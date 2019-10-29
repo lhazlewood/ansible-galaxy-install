@@ -17,13 +17,14 @@ until all transitive requirements have been resolved via `ansible-galaxy`.
 ## Install
 
 ```bash
-git clone https://github.com/lhazlewood/ansible-galaxy-install
-export PATH="ansible-galaxy-install/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/lhazlewood/ansible-galaxy-install/master/bin/ansible-galaxy-install -o ansible-galaxy-install
+chmod ugo+x ansible-galaxy-install
+# put ansible-galaxy-install somewhere in your $PATH
 ```
 
 ## Usage
 
-Once the `ansible-galaxy-install/bin` location is added to your `$PATH`, just call `ansible-galaxy-install` 
+Once the `ansible-galaxy-install` script is added to your `$PATH`, just call `ansible-galaxy-install` 
 (with two dashes) instead of the native `ansible-galaxy install` (one dash, one space) command.
 
 Use it identically to `ansible-galaxy install`, with all the same options and arguments.  The wrapper script
@@ -33,8 +34,8 @@ just delegates to the native ansible command.
 
 This command only downloads transitive requirements for newly downloaded roles.  If a 
 requirement has been downloaded already, it is skipped (and its `meta/requirements.yml` file - if any - is 
-not evaluated at all).
+not evaluated at all), which is standard ansible-galaxy behavior.
 
 If you want to force downloads of the immediate requirements use the standard `--force` options.  If you
-want to force downloads of immediate requirements *and* their dependencies (and so on and so forth), use the
-standard `--force-with-deps` option.
+want to force downloads of immediate requirements *and* their dependencies (and so on and so forth transitively), 
+use the standard `--force-with-deps` option.
